@@ -1,1 +1,73 @@
-name: RDP on: workflow_dispatch: jobs: secure-rdp: runs-on: windows-latest timeout-minutes: 3600 steps: - name: Configure Core RDP Settings run: | # Enable Remote Desktop and disable Network Level Authentication (if needed) Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' ` -Name "fDenyTSConnections" -Value 0 -Force Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' ` -Name "UserAuthentication" -Value 0 -Force Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' ` -Name "SecurityLayer" -Value 0 -Force # Remove any existing rule with the same name to avoid duplication netsh advfirewall firewall delete rule name="RDP-Tailscale" # For testing, allow any incoming connection on port 3389 netsh advfirewall firewall add rule name="RDP-Tailscale" ` dir=in action=allow protocol=TCP localport=3389 # (Optional) Restart the Remote Desktop service to ensure changes take effect Restart-Service -Name TermService -Force - name: Create RDP User with Secure Password run: | Add-Type -AssemblyName System.Security $charSet = @{ Upper = [char[]](65..90) # A-Z Lower = [char[]](97..122) # a-z Number = [char[]](48..57) # 0-9 Special = ([char[]](33..47) + [char[]](58..64) + [char[]](91..96) + [char[]](123..126)) # Special characters } $rawPassword = @() $rawPassword += $charSet.Upper | Get-Random -Count 4 $rawPassword += $charSet.Lower | Get-Random -Count 4 $rawPassword += $charSet.Number | Get-Random -Count 4 $rawPassword += $charSet.Special | Get-Random -Count 4 $password = -join ($rawPassword | Sort-Object { Get-Random }) $securePass = ConvertTo-SecureString $password -AsPlainText -Force New-LocalUs
+name: RDP com Tailscale
+
+on: 
+  workflow_dispatch:
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360 # Limite máximo real do GitHub Actions (6 horas)
+    
+    steps:
+    - name: Configurar Configurações Core do RDP
+      run: |
+        # Ativa o Desktop Remoto e ajusta camadas de segurança obrigatórias
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+        
+        # Remove regra antiga se houver e abre a porta 3389 no Firewall do Windows
+        netsh advfirewall firewall delete rule name="RDP-Tailscale"
+        netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+        
+        # Reinicia o serviço de RDP para aplicar as configurações
+        Restart-Service -Name TermService -Force
+
+    - name: Criar Usuário RDP com Senha Segura
+      run: |
+        Add-Type -AssemblyName System.Security
+        $charSet = @{
+            Upper   = [char[]](65..90)
+            Lower   = [char[]](97..122)
+            Number  = [char[]](48..57)
+            Special = ([char[]](33..47) + [char[]](58..64) + [char[]](91..96) + [char[]](123..126))
+        }
+        
+        $rawPassword = @()
+        $rawPassword += $charSet.Upper | Get-Random -Count 4
+        $rawPassword += $charSet.Lower | Get-Random -Count 4
+        $rawPassword += $charSet.Number | Get-Random -Count 4
+        $rawPassword += $charSet.Special | Get-Random -Count 4
+        $password = -join ($rawPassword | Sort-Object { Get-Random })
+        $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+        
+        # Criação do usuário e adição aos grupos necessários
+        New-LocalUser -Name "RdpUser" -Password $securePass -Description "Usuario para conexao RDP"
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser"
+        Add-LocalGroupMember -Group "Administrators" -Member "RdpUser"
+        
+        # Exibe os dados de login no painel do GitHub Actions
+        Write-Host "=========================================="
+        Write-Host "USUÁRIO RDP: RdpUser"
+        Write-Host "SENHA RDP  : $password"
+        Write-Host "=========================================="
+
+    - name: Baixar e Instalar Tailscale
+      run: |
+        Invoke-WebRequest -Uri "https://tailscale.com" -OutFile "tailscale-setup.exe"
+        Start-Process -FilePath ".\tailscale-setup.exe" -ArgumentList "/qn" -Wait
+
+    - name: Conectar ao Tailscale
+      run: |
+        # Substitua TAILSCALE_AUTH_KEY pelo seu Secret caso use uma chave própria, ou remova se for usar autenticação via link do painel
+        & "C:\Program Files\Tailscale\tailscale.exe" up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}"
+
+    - name: Manter Máquina Ativa para Conexão
+      run: |
+        Write-Host "A máquina está pronta para receber conexões RDP via IP do Tailscale."
+        Write-Host "O processo rodará até atingir o limite de tempo do GitHub."
+        
+        # Loop infinito para impedir que o GitHub Actions encerre o workflow imediatamente
+        while ($true) {
+            Start-Sleep -Seconds 60
+        }
