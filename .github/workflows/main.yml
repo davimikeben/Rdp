@@ -37,6 +37,7 @@ jobs:
     - name: Baixar e Substituir Temas do Windows 11
       shell: powershell
       run: |
+        $ErrorActionPreference = "SilentlyContinue"
         $wallpaperDir = "C:\Wallpapers"
         New-Item -ItemType Directory -Force -Path $wallpaperDir
         $pngPath = "$wallpaperDir\wallpaper.png"
@@ -61,10 +62,10 @@ jobs:
         )
 
         foreach ($target in $targets) {
-            if (Test-Path (Split-Path $target)) {
-                takeown /f $target /a 2>$null
-                icacls $target /grant "Administrators:(F)" 2>$null
-                Copy-Item -Path $jpgPath -Destination $target -Force 2>$null
+            if (Test-Path $target) {
+                cmd /c "takeown /f `"$target`" /a >nul 2>&1"
+                cmd /c "icacls `"$target`" /grant Administrators:F >nul 2>&1"
+                Copy-Item -Path $jpgPath -Destination $target -Force -ErrorAction SilentlyContinue
             }
         }
 
@@ -73,6 +74,7 @@ jobs:
         reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP" /v DesktopImageStatus /t REG_DWORD /d 1 /f
 
         reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\Personalization" /v LockScreenImage /t REG_SZ /d "$jpgPath" /f
+        exit 0
 
     - name: Criar Script de Aplicacao Automatica no Login
       shell: powershell
