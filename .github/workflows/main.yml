@@ -17,22 +17,20 @@ jobs:
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
         netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
         netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
-        Set-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force
         Restart-Service -Name TermService -Force
 
-    - name: Definir Wallpaper
+    - name: Definir Wallpaper via GPO
       shell: powershell
       run: |
         $wallpaperDir = "C:\Wallpapers"
         New-Item -ItemType Directory -Force -Path $wallpaperDir
-        $wallpaperPath = "$wallpaperDir\wallpaper.png"
+        $wallpaperPath = "$wallpaperDir\wallpaper.jpg"
+        
         $url = "https://i.imgur.com/8Yj0g2U.png"
         Invoke-WebRequest -Uri $url -OutFile $wallpaperPath
-        reg load HKU\DefaultTemp "C:\Users\Default\NTUSER.DAT"
-        reg add "HKU\DefaultTemp\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "$wallpaperPath" /f
-        reg add "HKU\DefaultTemp\Control Panel\Desktop" /v WallpaperStyle /t REG_SZ /d "2" /f
-        [GC]::Collect()
-        reg unload HKU\DefaultTemp
+
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v Wallpaper /t REG_SZ /d "$wallpaperPath" /f
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v WallpaperStyle /t REG_SZ /d "2" /f
 
     - name: Instalar Ferramentas e Tailscale
       shell: powershell
