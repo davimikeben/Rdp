@@ -9,22 +9,54 @@ jobs:
     timeout-minutes: 360
 
     steps:
-    - name: Configurar RDP e Firewall
+    - name: Configurar RDP, Firewall e Otimizações de Desempenho
       shell: powershell
       run: |
+        # Ativa o Desktop Remoto e ajusta camadas de segurança
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
         
+        # Abre a porta 3389 no Firewall do Windows
         netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
         netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
         
+        # Otimizações para melhorar a fluidez do RDP (desativa animações e efeitos pesados)
+        Set-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force
+        Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations" -Name "EnableNetworkPath" -Value 0 -Force
+
+        # Reinicia o serviço de RDP para aplicar as configurações
         Restart-Service -Name TermService -Force
 
-    - name: Instalar Tailscale
+    - name: Definir Wallpaper Personalizado
       shell: powershell
       run: |
+        $wallpaperDir = "C:\Wallpapers"
+        New-Item -ItemType Directory -Force -Path $wallpaperDir
+        $wallpaperPath = "$wallpaperDir\wallpaper.png"
+
+        # Download do wallpaper direto do seu Imgur
+        $url = "https://i.imgur.com/8Yj0g2U.png"
+        Invoke-WebRequest -Uri $url -OutFile $wallpaperPath
+
+        # Define no perfil base para carregar para o RdpUser
+        reg load HKU\DefaultTemp "C:\Users\Default\NTUSER.DAT"
+        Set-ItemProperty -Path "HKU\DefaultTemp\Control Panel\Desktop" -Name "Wallpaper" -Value $wallpaperPath
+        Set-ItemProperty -Path "HKU\DefaultTemp\Control Panel\Desktop" -Name "WallpaperStyle" -Value "2"
+        reg unload HKU\DefaultTemp
+
+    - name: Instalar Ferramentas e Tailscale
+      shell: powershell
+      run: |
+        # Instala Tailscale, Google Chrome e 7-Zip em modo silencioso
+        Write-Host "Instalando Tailscale..."
         winget install --id Tailscale.Tailscale --silent --accept-source-agreements --accept-package-agreements
+        
+        Write-Host "Instalando Google Chrome..."
+        winget install --id Google.Chrome --silent --accept-source-agreements --accept-package-agreements
+        
+        Write-Host "Instalando 7-Zip..."
+        winget install --id 7zip.7zip --silent --accept-source-agreements --accept-package-agreements
 
     - name: Iniciar Servidor RDP e Tailscale
       shell: powershell
@@ -35,7 +67,7 @@ jobs:
         $password = -join ((1..16) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
         $securePass = ConvertTo-SecureString $password -AsPlainText -Force
         
-        # 2. Criar Usuário
+        # 2. Criar Usuário RDP
         New-LocalUser -Name "RdpUser" -Password $securePass -Description "Usuario RDP" -ErrorAction SilentlyContinue
         Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser" -ErrorAction SilentlyContinue
         Add-LocalGroupMember -Group "Administrators" -Member "RdpUser" -ErrorAction SilentlyContinue
@@ -44,7 +76,7 @@ jobs:
         $env:Path += ";C:\Program Files\Tailscale"
         tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --unattended --accept-routes
         
-        # Aguarda 3 segundos para garantir a atribuição de IP
+        # Aguarda a atribuição de IP
         Start-Sleep -Seconds 3
         $tailscaleIp = tailscale ip -4
 
@@ -55,6 +87,7 @@ jobs:
         Write-Host "USUARIO      : RdpUser" -ForegroundColor Yellow
         Write-Host "SENHA        : $password" -ForegroundColor Yellow
         Write-Host "==========================================" -ForegroundColor Green
+        Write-Host "Google Chrome e 7-Zip já instalados."
         Write-Host "Conecte-se usando o aplicativo de Conexao de Area de Trabalho Remota."
         
         # 5. Manter a máquina ativa
