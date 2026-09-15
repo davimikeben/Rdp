@@ -6,78 +6,58 @@ on:
 jobs:
   secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 360 # Limite máximo real do GitHub Actions (6 horas)
-    
+    timeout-minutes: 360
+
     steps:
     - name: Configurar RDP e Firewall
       shell: powershell
       run: |
-        # Ativa o Desktop Remoto e ajusta camadas de segurança
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
         
-        # Abre a porta 3389 no Firewall do Windows
         netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
         netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
         
-        # Reinicia o serviço de RDP para aplicar as alterações
         Restart-Service -Name TermService -Force
-
-    - name: Criar Usuário RDP
-      id: user_setup
-      shell: powershell
-      run: |
-        Add-Type -AssemblyName System.Security
-        $charSet = @{
-            Upper   = [char[]](65..90)
-            Lower   = [char[]](97..122)
-            Number  = [char[]](48..57)
-            Special = ([char[]](33..47) + [char[]](58..64) + [char[]](91..96) + [char[]](123..126))
-        }
-        
-        $rawPassword = @()
-        $rawPassword += $charSet.Upper | Get-Random -Count 4
-        $rawPassword += $charSet.Lower | Get-Random -Count 4
-        $rawPassword += $charSet.Number | Get-Random -Count 4
-        $rawPassword += $charSet.Special | Get-Random -Count 4
-        $password = -join ($rawPassword | Sort-Object { Get-Random })
-        $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-        
-        # Criação do usuário e permissões administrativas
-        New-LocalUser -Name "RdpUser" -Password $securePass -Description "Usuario RDP"
-        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser"
-        Add-LocalGroupMember -Group "Administrators" -Member "RdpUser"
-        
-        # Salva a senha mascarada como output para os próximos passos
-        echo "PASS=$password" >> $env:GITHUB_ENV
 
     - name: Instalar Tailscale
       shell: powershell
       run: |
-        # Instala silenciosamente via winget
         winget install --id Tailscale.Tailscale --silent --accept-source-agreements --accept-package-agreements
 
-    - name: Conectar ao Tailscale
+    - name: Iniciar Servidor RDP e Tailscale
       shell: powershell
       run: |
-        # Adiciona a pasta do Tailscale ao PATH atual da sessão
-        $env:Path += ";C:\Program Files\Tailscale"
+        # 1. Gerar Senha Segura
+        Add-Type -AssemblyName System.Security
+        $chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*"
+        $password = -join ((1..16) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
+        $securePass = ConvertTo-SecureString $password -AsPlainText -Force
         
-        # Autentica na rede Tailscale
+        # 2. Criar Usuário
+        New-LocalUser -Name "RdpUser" -Password $securePass -Description "Usuario RDP" -ErrorAction SilentlyContinue
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser" -ErrorAction SilentlyContinue
+        Add-LocalGroupMember -Group "Administrators" -Member "RdpUser" -ErrorAction SilentlyContinue
+
+        # 3. Conectar ao Tailscale
+        $env:Path += ";C:\Program Files\Tailscale"
         tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --unattended --accept-routes
         
-        # Captura o IP do Tailscale
+        # Aguarda 3 segundos para garantir a atribuição de IP
+        Start-Sleep -Seconds 3
         $tailscaleIp = tailscale ip -4
-        echo "TS_IP=$tailscaleIp" >> $env:GITHUB_ENV
 
-    - name: Dados de Conexão e Manutenção da Sessão
-      shell: powershell
-      run: |
+        # 4. Exibir Dados de Conexão no Log
         Write-Host "==========================================" -ForegroundColor Green
-        Write-Host "MÁQUINA PRONTA PARA CONEXÃO!" -ForegroundColor Green
-        Write-Host "IP (Tailscale): $env:TS_IP" -ForegroundColor Yellow
-        Write-Host "USUÁRIO       : RdpUser" -ForegroundColor Yellow
-        Write-Host "SENHA         : $env:PASS" -ForegroundColor Yellow
+        Write-Host ">>> CONEXÃO PRONTA <<<" -ForegroundColor Green
+        Write-Host "IP TAILSCALE : $tailscaleIp" -ForegroundColor Yellow
+        Write-Host "USUARIO      : RdpUser" -ForegroundColor Yellow
+        Write-Host "SENHA        : $password" -ForegroundColor Yellow
         Write-Host "==========================================" -ForegroundColor Green
-        Write-Host "Aguardando conexões... Pressione 'Canc
+        Write-Host "Conecte-se usando o aplicativo de Conexao de Area de Trabalho Remota."
+        
+        # 5. Manter a máquina ativa
+        while ($true) {
+            Start-Sleep -Seconds 60
+        }
