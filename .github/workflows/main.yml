@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
-    - name: Configurar RDP, Firewall e Otimizacoes
+    - name: Otimizar Recursos e Configurar RDP
       shell: powershell
       run: |
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
@@ -17,20 +17,47 @@ jobs:
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
         netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
         netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+
+        reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v fEnableDesktopWallpaper /t REG_DWORD /d 1 /f
+        reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxColorDepth /t REG_DWORD /d 32 /f
+
+        powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl" -Name "Win32PrioritySeparation" -Value 38 -Force
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "LargeSystemCache" -Value 0 -Force
+        Set-CimInstance -Query "SELECT * FROM Win32_PageFileSetting WHERE SettingID LIKE 'C:%'" -Property @{InitialSize = 8192; MaximumSize = 16384} -ErrorAction SilentlyContinue
+
         Restart-Service -Name TermService -Force
 
-    - name: Definir Wallpaper via GPO
+    - name: Baixar e Processar Imagem
       shell: powershell
       run: |
         $wallpaperDir = "C:\Wallpapers"
         New-Item -ItemType Directory -Force -Path $wallpaperDir
-        $wallpaperPath = "$wallpaperDir\wallpaper.jpg"
-        
-        $url = "https://i.imgur.com/8Yj0g2U.png"
-        Invoke-WebRequest -Uri $url -OutFile $wallpaperPath
+        $pngPath = "$wallpaperDir\wallpaper.png"
+        $bmpPath = "$wallpaperDir\wallpaper.bmp"
+        $jpgPath = "$wallpaperDir\wallpaper.jpg"
 
-        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v Wallpaper /t REG_SZ /d "$wallpaperPath" /f
+        $url = "https://raw.githubusercontent.com/davimikeben/WALLPAPER-IMAGEM-PARA-PC/refs/heads/main/file_000000009e10820eb6fa2a09146bf436.png"
+        Invoke-WebRequest -Uri $url -OutFile $pngPath
+
+        Add-Type -AssemblyName System.Drawing
+        $image = [System.Drawing.Image]::FromFile($pngPath)
+        $image.Save($bmpPath, [System.Drawing.Imaging.ImageFormat]::Bmp)
+        $image.Save($jpgPath, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+        $image.Dispose()
+
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v Wallpaper /t REG_SZ /d "$bmpPath" /f
         reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v WallpaperStyle /t REG_SZ /d "2" /f
+
+        reg load HKU\DefaultTemp "C:\Users\Default\NTUSER.DAT"
+        reg add "HKU\DefaultTemp\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "$bmpPath" /f
+        reg add "HKU\DefaultTemp\Control Panel\Desktop" /v WallpaperStyle /t REG_SZ /d "2" /f
+        [GC]::Collect()
+        reg unload HKU\DefaultTemp
+
+        takeown /f "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /a 2>$null
+        icacls "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /grant "Administrators:(F)" 2>$null
+        Copy-Item -Path $jpgPath -Destination "C:\Windows\Web\Wallpaper\Windows\img0.jpg" -Force
 
     - name: Instalar Ferramentas e Tailscale
       shell: powershell
