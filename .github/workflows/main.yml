@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
-    - name: Otimizar Recursos e Configurar RDP
+    - name: Otimizar Recursos, Threads e Configurar RDP
       shell: powershell
       run: |
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
@@ -22,13 +22,22 @@ jobs:
         reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxColorDepth /t REG_DWORD /d 32 /f
 
         powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+        powercfg /setacvalueindex scheme_current sub_processor CPMINCORES 100
+        powercfg /setacvalueindex scheme_current sub_processor CPMAXCORES 100
+        powercfg /setacvalueindex scheme_current sub_processor THROTTLING 0
+        powercfg /setacvalueindex scheme_current sub_processor PERFBOOSTMODE 2
+        powercfg /setactive scheme_current
+
+        $cores = (Get-CimInstance Win32_Processor).NumberOfLogicalProcessors
+        bcdedit /deletevalue numproc 2>$null
+
         Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl" -Name "Win32PrioritySeparation" -Value 38 -Force
         Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "LargeSystemCache" -Value 0 -Force
         Set-CimInstance -Query "SELECT * FROM Win32_PageFileSetting WHERE SettingID LIKE 'C:%'" -Property @{InitialSize = 8192; MaximumSize = 16384} -ErrorAction SilentlyContinue
 
         Restart-Service -Name TermService -Force
 
-    - name: Baixar e Processar Imagem
+    - name: Baixar e Substituir Temas do Windows 11
       shell: powershell
       run: |
         $wallpaperDir = "C:\Wallpapers"
@@ -46,18 +55,43 @@ jobs:
         $image.Save($jpgPath, [System.Drawing.Imaging.ImageFormat]::Jpeg)
         $image.Dispose()
 
-        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v Wallpaper /t REG_SZ /d "$bmpPath" /f
-        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v WallpaperStyle /t REG_SZ /d "2" /f
+        $targets = @(
+            "C:\Windows\Web\Wallpaper\Windows\img0.jpg",
+            "C:\Windows\Web\Wallpaper\Theme1\img1.jpg",
+            "C:\Windows\Web\Wallpaper\Theme2\img2.jpg",
+            "C:\Windows\Web\4K\Wallpaper\Windows\img0_3840x2160.jpg",
+            "C:\Windows\Web\4K\Wallpaper\Windows\img0_1920x1200.jpg"
+        )
 
-        reg load HKU\DefaultTemp "C:\Users\Default\NTUSER.DAT"
-        reg add "HKU\DefaultTemp\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "$bmpPath" /f
-        reg add "HKU\DefaultTemp\Control Panel\Desktop" /v WallpaperStyle /t REG_SZ /d "2" /f
-        [GC]::Collect()
-        reg unload HKU\DefaultTemp
+        foreach ($target in $targets) {
+            if (Test-Path (Split-Path $target)) {
+                takeown /f $target /a 2>$null
+                icacls $target /grant "Administrators:(F)" 2>$null
+                Copy-Item -Path $jpgPath -Destination $target -Force 2>$null
+            }
+        }
 
-        takeown /f "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /a 2>$null
-        icacls "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /grant "Administrators:(F)" 2>$null
-        Copy-Item -Path $jpgPath -Destination "C:\Windows\Web\Wallpaper\Windows\img0.jpg" -Force
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP" /v DesktopImagePath /t REG_SZ /d "$jpgPath" /f
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP" /v DesktopImageUrl /t REG_SZ /d "$jpgPath" /f
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP" /v DesktopImageStatus /t REG_DWORD /d 1 /f
+
+        reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\Personalization" /v LockScreenImage /t REG_SZ /d "$jpgPath" /f
+
+    - name: Criar Script de Aplicacao Automatica no Login
+      shell: powershell
+      run: |
+        $startupDir = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
+        
+        $vbs = @"
+        Set oShell = CreateObject("WScript.Shell")
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        WScript.Sleep 2000
+        oShell.RegWrite "HKCU\Control Panel\Desktop\Wallpaper", "C:\Wallpapers\wallpaper.bmp", "REG_SZ"
+        oShell.RegWrite "HKCU\Control Panel\Desktop\WallpaperStyle", "2", "REG_SZ"
+        oShell.Run "RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters 1, True", 0, True
+        "@
+        
+        Set-Content -Path "$startupDir\set_wallpaper.vbs" -Value $vbs -Encoding Ascii
 
     - name: Instalar Ferramentas e Tailscale
       shell: powershell
