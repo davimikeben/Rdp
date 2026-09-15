@@ -9,21 +9,24 @@ jobs:
     timeout-minutes: 360 # Limite máximo real do GitHub Actions (6 horas)
     
     steps:
-    - name: Configurar Configurações Core do RDP
+    - name: Configurar RDP e Firewall
+      shell: powershell
       run: |
-        # Ativa o Desktop Remoto e ajusta camadas de segurança obrigatórias
+        # Ativa o Desktop Remoto e ajusta camadas de segurança
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
         
-        # Remove regra antiga se houver e abre a porta 3389 no Firewall do Windows
-        netsh advfirewall firewall delete rule name="RDP-Tailscale"
+        # Abre a porta 3389 no Firewall do Windows
+        netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
         netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
         
-        # Reinicia o serviço de RDP para aplicar as configurações
+        # Reinicia o serviço de RDP para aplicar as alterações
         Restart-Service -Name TermService -Force
 
-    - name: Criar Usuário RDP com Senha Segura
+    - name: Criar Usuário RDP
+      id: user_setup
+      shell: powershell
       run: |
         Add-Type -AssemblyName System.Security
         $charSet = @{
@@ -41,73 +44,40 @@ jobs:
         $password = -join ($rawPassword | Sort-Object { Get-Random })
         $securePass = ConvertTo-SecureString $password -AsPlainText -Force
         
-        # Criação do usuário e adição aos grupos de acesso
-        New-LocalUser -Name "RdpUser" -Password $securePass -Description "Usuario para conexao RDP"
+        # Criação do usuário e permissões administrativas
+        New-LocalUser -Name "RdpUser" -Password $securePass -Description "Usuario RDP"
         Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser"
         Add-LocalGroupMember -Group "Administrators" -Member "RdpUser"
         
-        # Exibe os dados de login no painel do GitHub Actions
-        Write-Host "=========================================="
-        Write-Host "USUÁRIO RDP: RdpUser"
-        Write-Host "SENHA RDP  : $password"
-        Write-Host "=========================================="
+        # Salva a senha mascarada como output para os próximos passos
+        echo "PASS=$password" >> $env:GITHUB_ENV
 
-    - name: Baixar e Instalar Tailscale
+    - name: Instalar Tailscale
+      shell: powershell
       run: |
-        # Baixa o instalador oficial estável .msi do repositório da Tailscale
-        Invoke-WebRequest -Uri "https://tailscale.com" -OutFile "tailscale-setup.msi"
-        
-        # Realiza a instalação 100% silenciosa em segundo plano
-        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i tailscale-setup.msi /qn /norestart" -Wait
+        # Instala silenciosamente via winget
+        winget install --id Tailscale.Tailscale --silent --accept-source-agreements --accept-package-agreements
 
     - name: Conectar ao Tailscale
+      shell: powershell
       run: |
-        # Autentica e inicia a rede mesh usando a sua chave salva nos Secrets do GitHub
-        & "C:\Program Files\Tailscale\tailscale.exe" up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}"
-
-    - name: Manter Máquina Ativa para Conexão
-      run: |
-        Write-Host "A máquina está pronta para receber conexões RDP via IP do Tailscale."
-        Write-Host "O processo rodará até atingir o limite de tempo do GitHub."
+        # Adiciona a pasta do Tailscale ao PATH atual da sessão
+        $env:Path += ";C:\Program Files\Tailscale"
         
-        # Loop infinito para impedir o encerramento prematuro do job
-        while ($true) {
-            Start-Sleep -Seconds 60
-        }
-        $rawPassword += $charSet.Upper | Get-Random -Count 4
-        $rawPassword += $charSet.Lower | Get-Random -Count 4
-        $rawPassword += $charSet.Number | Get-Random -Count 4
-        $rawPassword += $charSet.Special | Get-Random -Count 4
-        $password = -join ($rawPassword | Sort-Object { Get-Random })
-        $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+        # Autentica na rede Tailscale
+        tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --unattended --accept-routes
         
-        # Criação do usuário e adição aos grupos necessários
-        New-LocalUser -Name "RdpUser" -Password $securePass -Description "Usuario para conexao RDP"
-        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser"
-        Add-LocalGroupMember -Group "Administrators" -Member "RdpUser"
-        
-        # Exibe os dados de login no painel do GitHub Actions
-        Write-Host "=========================================="
-        Write-Host "USUÁRIO RDP: RdpUser"
-        Write-Host "SENHA RDP  : $password"
-        Write-Host "=========================================="
+        # Captura o IP do Tailscale
+        $tailscaleIp = tailscale ip -4
+        echo "TS_IP=$tailscaleIp" >> $env:GITHUB_ENV
 
-    - name: Baixar e Instalar Tailscale
+    - name: Dados de Conexão e Manutenção da Sessão
+      shell: powershell
       run: |
-        Invoke-WebRequest -Uri "https://tailscale.com" -OutFile "tailscale-setup.exe"
-        Start-Process -FilePath ".\tailscale-setup.exe" -ArgumentList "/qn" -Wait
-
-    - name: Conectar ao Tailscale
-      run: |
-        # Substitua TAILSCALE_AUTH_KEY pelo seu Secret caso use uma chave própria, ou remova se for usar autenticação via link do painel
-        & "C:\Program Files\Tailscale\tailscale.exe" up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}"
-
-    - name: Manter Máquina Ativa para Conexão
-      run: |
-        Write-Host "A máquina está pronta para receber conexões RDP via IP do Tailscale."
-        Write-Host "O processo rodará até atingir o limite de tempo do GitHub."
-        
-        # Loop infinito para impedir que o GitHub Actions encerre o workflow imediatamente
-        while ($true) {
-            Start-Sleep -Seconds 60
-        }
+        Write-Host "==========================================" -ForegroundColor Green
+        Write-Host "MÁQUINA PRONTA PARA CONEXÃO!" -ForegroundColor Green
+        Write-Host "IP (Tailscale): $env:TS_IP" -ForegroundColor Yellow
+        Write-Host "USUÁRIO       : RdpUser" -ForegroundColor Yellow
+        Write-Host "SENHA         : $env:PASS" -ForegroundColor Yellow
+        Write-Host "==========================================" -ForegroundColor Green
+        Write-Host "Aguardando conexões... Pressione 'Canc
