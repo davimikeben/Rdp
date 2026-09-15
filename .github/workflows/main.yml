@@ -28,9 +28,6 @@ jobs:
         powercfg /setacvalueindex scheme_current sub_processor PERFBOOSTMODE 2
         powercfg /setactive scheme_current
 
-        $cores = (Get-CimInstance Win32_Processor).NumberOfLogicalProcessors
-        bcdedit /deletevalue numproc 2>$null
-
         Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl" -Name "Win32PrioritySeparation" -Value 38 -Force
         Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "LargeSystemCache" -Value 0 -Force
         Set-CimInstance -Query "SELECT * FROM Win32_PageFileSetting WHERE SettingID LIKE 'C:%'" -Property @{InitialSize = 8192; MaximumSize = 16384} -ErrorAction SilentlyContinue
