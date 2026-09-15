@@ -21,11 +21,10 @@ jobs:
         netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
         netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
         
-        # Otimizações para melhorar a fluidez do RDP (desativa animações e efeitos pesados)
+        # Otimizações para melhorar a fluidez do RDP
         Set-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force
-        Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations" -Name "EnableNetworkPath" -Value 0 -Force
 
-        # Reinicia o serviço de RDP para aplicar as configurações
+        # Reinicia o serviço de RDP
         Restart-Service -Name TermService -Force
 
     - name: Definir Wallpaper Personalizado
@@ -35,20 +34,20 @@ jobs:
         New-Item -ItemType Directory -Force -Path $wallpaperDir
         $wallpaperPath = "$wallpaperDir\wallpaper.png"
 
-        # Download do wallpaper direto do seu Imgur
+        # Download do wallpaper
         $url = "https://i.imgur.com/8Yj0g2U.png"
         Invoke-WebRequest -Uri $url -OutFile $wallpaperPath
 
-        # Define no perfil base para carregar para o RdpUser
+        # Aplica usando o reg.exe nativo (evita erros de caminho no PowerShell)
         reg load HKU\DefaultTemp "C:\Users\Default\NTUSER.DAT"
-        Set-ItemProperty -Path "HKU\DefaultTemp\Control Panel\Desktop" -Name "Wallpaper" -Value $wallpaperPath
-        Set-ItemProperty -Path "HKU\DefaultTemp\Control Panel\Desktop" -Name "WallpaperStyle" -Value "2"
+        reg add "HKU\DefaultTemp\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "$wallpaperPath" /f
+        reg add "HKU\DefaultTemp\Control Panel\Desktop" /v WallpaperStyle /t REG_SZ /d "2" /f
+        [GC]::Collect()
         reg unload HKU\DefaultTemp
 
     - name: Instalar Ferramentas e Tailscale
       shell: powershell
       run: |
-        # Instala Tailscale, Google Chrome e 7-Zip em modo silencioso
         Write-Host "Instalando Tailscale..."
         winget install --id Tailscale.Tailscale --silent --accept-source-agreements --accept-package-agreements
         
