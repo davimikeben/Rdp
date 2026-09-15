@@ -9,36 +9,25 @@ jobs:
     timeout-minutes: 360
 
     steps:
-    - name: Configurar RDP, Firewall e Otimizações de Desempenho
+    - name: Configurar RDP, Firewall e Otimizacoes
       shell: powershell
       run: |
-        # Ativa o Desktop Remoto e ajusta camadas de segurança
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-        
-        # Abre a porta 3389 no Firewall do Windows
         netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
         netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
-        
-        # Otimizações para melhorar a fluidez do RDP
         Set-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force
-
-        # Reinicia o serviço de RDP
         Restart-Service -Name TermService -Force
 
-    - name: Definir Wallpaper Personalizado
+    - name: Definir Wallpaper
       shell: powershell
       run: |
         $wallpaperDir = "C:\Wallpapers"
         New-Item -ItemType Directory -Force -Path $wallpaperDir
         $wallpaperPath = "$wallpaperDir\wallpaper.png"
-
-        # Download do wallpaper
         $url = "https://i.imgur.com/8Yj0g2U.png"
         Invoke-WebRequest -Uri $url -OutFile $wallpaperPath
-
-        # Aplica usando o reg.exe nativo (evita erros de caminho no PowerShell)
         reg load HKU\DefaultTemp "C:\Users\Default\NTUSER.DAT"
         reg add "HKU\DefaultTemp\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "$wallpaperPath" /f
         reg add "HKU\DefaultTemp\Control Panel\Desktop" /v WallpaperStyle /t REG_SZ /d "2" /f
@@ -48,48 +37,36 @@ jobs:
     - name: Instalar Ferramentas e Tailscale
       shell: powershell
       run: |
-        Write-Host "Instalando Tailscale..."
+        $ErrorActionPreference = "Continue"
         winget install --id Tailscale.Tailscale --silent --accept-source-agreements --accept-package-agreements
-        
-        Write-Host "Instalando Google Chrome..."
         winget install --id Google.Chrome --silent --accept-source-agreements --accept-package-agreements
-        
-        Write-Host "Instalando 7-Zip..."
-        winget install --id 7zip.7zip --silent --accept-source-agreements --accept-package-agreements
+        exit 0
 
     - name: Iniciar Servidor RDP e Tailscale
       shell: powershell
       run: |
-        # 1. Gerar Senha Segura
         Add-Type -AssemblyName System.Security
         $chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*"
         $password = -join ((1..16) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
         $securePass = ConvertTo-SecureString $password -AsPlainText -Force
         
-        # 2. Criar Usuário RDP
         New-LocalUser -Name "RdpUser" -Password $securePass -Description "Usuario RDP" -ErrorAction SilentlyContinue
         Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser" -ErrorAction SilentlyContinue
         Add-LocalGroupMember -Group "Administrators" -Member "RdpUser" -ErrorAction SilentlyContinue
 
-        # 3. Conectar ao Tailscale
         $env:Path += ";C:\Program Files\Tailscale"
         tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --unattended --accept-routes
         
-        # Aguarda a atribuição de IP
         Start-Sleep -Seconds 3
         $tailscaleIp = tailscale ip -4
 
-        # 4. Exibir Dados de Conexão no Log
         Write-Host "==========================================" -ForegroundColor Green
         Write-Host ">>> CONEXÃO PRONTA <<<" -ForegroundColor Green
         Write-Host "IP TAILSCALE : $tailscaleIp" -ForegroundColor Yellow
         Write-Host "USUARIO      : RdpUser" -ForegroundColor Yellow
         Write-Host "SENHA        : $password" -ForegroundColor Yellow
         Write-Host "==========================================" -ForegroundColor Green
-        Write-Host "Google Chrome e 7-Zip já instalados."
-        Write-Host "Conecte-se usando o aplicativo de Conexao de Area de Trabalho Remota."
         
-        # 5. Manter a máquina ativa
         while ($true) {
             Start-Sleep -Seconds 60
         }
