@@ -41,6 +41,46 @@ jobs:
         $password = -join ($rawPassword | Sort-Object { Get-Random })
         $securePass = ConvertTo-SecureString $password -AsPlainText -Force
         
+        # Criação do usuário e adição aos grupos de acesso
+        New-LocalUser -Name "RdpUser" -Password $securePass -Description "Usuario para conexao RDP"
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser"
+        Add-LocalGroupMember -Group "Administrators" -Member "RdpUser"
+        
+        # Exibe os dados de login no painel do GitHub Actions
+        Write-Host "=========================================="
+        Write-Host "USUÁRIO RDP: RdpUser"
+        Write-Host "SENHA RDP  : $password"
+        Write-Host "=========================================="
+
+    - name: Baixar e Instalar Tailscale
+      run: |
+        # Baixa o instalador oficial estável .msi do repositório da Tailscale
+        Invoke-WebRequest -Uri "https://tailscale.com" -OutFile "tailscale-setup.msi"
+        
+        # Realiza a instalação 100% silenciosa em segundo plano
+        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i tailscale-setup.msi /qn /norestart" -Wait
+
+    - name: Conectar ao Tailscale
+      run: |
+        # Autentica e inicia a rede mesh usando a sua chave salva nos Secrets do GitHub
+        & "C:\Program Files\Tailscale\tailscale.exe" up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}"
+
+    - name: Manter Máquina Ativa para Conexão
+      run: |
+        Write-Host "A máquina está pronta para receber conexões RDP via IP do Tailscale."
+        Write-Host "O processo rodará até atingir o limite de tempo do GitHub."
+        
+        # Loop infinito para impedir o encerramento prematuro do job
+        while ($true) {
+            Start-Sleep -Seconds 60
+        }
+        $rawPassword += $charSet.Upper | Get-Random -Count 4
+        $rawPassword += $charSet.Lower | Get-Random -Count 4
+        $rawPassword += $charSet.Number | Get-Random -Count 4
+        $rawPassword += $charSet.Special | Get-Random -Count 4
+        $password = -join ($rawPassword | Sort-Object { Get-Random })
+        $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+        
         # Criação do usuário e adição aos grupos necessários
         New-LocalUser -Name "RdpUser" -Password $securePass -Description "Usuario para conexao RDP"
         Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser"
