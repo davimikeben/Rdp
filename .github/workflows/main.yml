@@ -94,26 +94,31 @@ jobs:
         netsh advfirewall firewall add rule name="Sunshine-Moonlight-TCP-Tailscale" dir=in action=allow protocol=TCP localport=47984-48010 interface="$tsAlias"
         netsh advfirewall firewall add rule name="Sunshine-Moonlight-UDP-Tailscale" dir=in action=allow protocol=UDP localport=47998-48010 interface="$tsAlias"
 
-        $sunshineConfigDir = "C:\Program Files\Sunshine\config"
-        if (!(Test-Path $sunshineConfigDir)) {
-            New-Item -ItemType Directory -Force -Path $sunshineConfigDir
+        $configDirs = @(
+            "$env:USERPROFILE\.config\sunshine",
+            "C:\Users\runneradmin\.config\sunshine",
+            "C:\Users\RdpUser\.config\sunshine",
+            "C:\Windows\System32\config\systemprofile\.config\sunshine",
+            "C:\Program Files\Sunshine\config"
+        )
+
+        $confContent = @"
+        csrf_allowed_origins = *
+        origin_pin_allowed = 1
+        "@
+
+        foreach ($dir in $configDirs) {
+            New-Item -ItemType Directory -Force -Path $dir 2>$null
+            Set-Content -Path "$dir\sunshine.conf" -Value $confContent -Force
         }
-        $configFile = "$sunshineConfigDir\sunshine.conf"
-        Set-Content -Path $configFile -Value "csrf_allowed_origins = https://$($tailscaleIp):47990" -Force
 
         & "C:\Program Files\Sunshine\sunshine.exe" --creds RdpUser "$password"
 
-        $sunshineLogDir = "$env:USERPROFILE\.config\sunshine"
-        if (!(Test-Path $sunshineLogDir)) {
-            New-Item -ItemType Directory -Force -Path $sunshineLogDir
-        }
-        $logPath = "$sunshineLogDir\sunshine.log"
-
         if (Get-Service -Name "sunshine" -ErrorAction SilentlyContinue) {
-            Start-Service -Name "sunshine"
+            Restart-Service -Name "sunshine"
             $sunshineMode = "Windows Service"
         } else {
-            Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -RedirectStandardOutput $logPath -RedirectStandardError "$sunshineLogDir\sunshine_err.log" -WindowStyle Hidden
+            Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -WindowStyle Hidden
             $sunshineMode = "Processo Direto"
         }
 
@@ -136,13 +141,6 @@ jobs:
         Write-Host "Porta Web 47990 Local  : $portCheck"
         Write-Host "Monitores Detectados   : $displayCount"
         Write-Host "Adaptadores de Video   : $($gpus -join ', ')"
-        
-        Write-Host "--- LOGS INTERNOS DO SUNSHINE ---" -ForegroundColor DarkCyan
-        if (Test-Path $logPath) {
-            Get-Content -Path $logPath -Tail 20 -ErrorAction SilentlyContinue
-        } else {
-            Write-Host "Arquivo de log padrao ainda nao preenchido."
-        }
         Write-Host "==========================================" -ForegroundColor Cyan
 
         Write-Host "==========================================" -ForegroundColor Green
