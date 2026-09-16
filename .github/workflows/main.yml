@@ -94,6 +94,13 @@ jobs:
         netsh advfirewall firewall add rule name="Sunshine-Moonlight-TCP-Tailscale" dir=in action=allow protocol=TCP localport=47984-48010 interface="$tsAlias"
         netsh advfirewall firewall add rule name="Sunshine-Moonlight-UDP-Tailscale" dir=in action=allow protocol=UDP localport=47998-48010 interface="$tsAlias"
 
+        $sunshineConfigDir = "C:\Program Files\Sunshine\config"
+        if (!(Test-Path $sunshineConfigDir)) {
+            New-Item -ItemType Directory -Force -Path $sunshineConfigDir
+        }
+        $configFile = "$sunshineConfigDir\sunshine.conf"
+        Set-Content -Path $configFile -Value "csrf_allowed_origins = https://$($tailscaleIp):47990" -Force
+
         & "C:\Program Files\Sunshine\sunshine.exe" --creds RdpUser "$password"
 
         $sunshineLogDir = "$env:USERPROFILE\.config\sunshine"
