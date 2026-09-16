@@ -2,11 +2,6 @@ name: RDP e Sunshine com Diagnostico
 
 on: 
   workflow_dispatch:
-    inputs:
-      moonlight_pin:
-        description: 'Digite o PIN do Moonlight aqui (opcional se for parear pelo painel)'
-        required: false
-        default: ''
 
 jobs:
   secure-rdp:
@@ -20,11 +15,12 @@ jobs:
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-        netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
-        netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
 
         reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v fEnableDesktopWallpaper /t REG_DWORD /d 1 /f
         reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxColorDepth /t REG_DWORD /d 32 /f
+
+        # Desativa todos os perfis do firewall para não bloquear nenhuma porta do Moonlight
+        netsh advfirewall set allprofiles state off
 
         powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
         Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl" -Name "Win32PrioritySeparation" -Value 38 -Force
@@ -73,7 +69,7 @@ jobs:
         winget install --id LizardByte.Sunshine --silent --accept-source-agreements --accept-package-agreements
         exit 0
 
-    - name: Iniciar Servicos e Diagnostico Detalhado
+    - name: Iniciar Servicos e Sunshine
       shell: powershell
       run: |
         Add-Type -AssemblyName System.Security
@@ -91,40 +87,14 @@ jobs:
         Start-Sleep -Seconds 3
         $tailscaleIp = tailscale ip -4
 
-        netsh advfirewall firewall add rule name="Sunshine-All-TCP" dir=in action=allow protocol=TCP localport=47984-48010
-        netsh advfirewall firewall add rule name="Sunshine-All-UDP" dir=in action=allow protocol=UDP localport=47984-48010
-
-        Stop-Process -Name "sunshine" -Force -ErrorAction SilentlyContinue
-        Stop-Service -Name "sunshine" -Force -ErrorAction SilentlyContinue
-
-        $configDirs = @(
-            "$env:USERPROFILE\.config\sunshine",
-            "C:\Users\runneradmin\.config\sunshine",
-            "C:\Windows\System32\config\systemprofile\.config\sunshine",
-            "C:\Program Files\Sunshine\config"
-        )
-
-        $confLines = @(
-            "origin_pin_allowed = enabled",
-            "flags = 0",
-            "csrf_allowed_origins = https://$($tailscaleIp):47990,http://$($tailscaleIp):47989,https://localhost:47990"
-        )
-
-        foreach ($dir in $configDirs) {
-            New-Item -ItemType Directory -Force -Path $dir 2>$null
-            [System.IO.File]::WriteAllLines("$dir\sunshine.conf", $confLines)
-        }
-
+        # Força credenciais para a web do Sunshine
         & "C:\Program Files\Sunshine\sunshine.exe" --creds RdpUser "$password"
 
-        Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -WindowStyle Hidden
-        Start-Sleep -Seconds 4
+        # Registra e inicia como serviço do Windows com privilégios de sistema
+        cmd /c "C:\Program Files\Sunshine\sunshine.exe --shortcut" 2>$null
+        Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -ArgumentList "C:\Program Files\Sunshine\config\sunshine.conf" -WindowStyle Hidden
 
-        $providedPin = "${{ github.event.inputs.moonlight_pin }}"
-        if ($providedPin -ne "") {
-            Write-Host "Tentando pareamento automatico via CLI com o PIN fornecido..." -ForegroundColor Cyan
-            & "C:\Program Files\Sunshine\sunshine.exe" --pin "$providedPin"
-        }
+        Start-Sleep -Seconds 5
 
         Write-Host "==========================================" -ForegroundColor Green
         Write-Host "DADOS DE CONEXAO" -ForegroundColor Green
@@ -136,6 +106,7 @@ jobs:
         Write-Host "LOGIN WEB      : RdpUser" -ForegroundColor Cyan
         Write-Host "SENHA WEB      : $password" -ForegroundColor Cyan
         Write-Host "==========================================" -ForegroundColor Green
+        Write-Host "Firewall 100% desligado para permitir pareamento imediato no Moonlight."
 
         while ($true) {
             Start-Sleep -Seconds 60
