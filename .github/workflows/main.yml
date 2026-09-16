@@ -1,4 +1,4 @@
-name: RDP e Sunshine com Diagnostico
+name: RDP e Sunshine com Tailscale
 
 on: 
   workflow_dispatch:
@@ -9,9 +9,10 @@ jobs:
     timeout-minutes: 360
 
     steps:
-    - name: Otimizar Recursos e Configurar RDP
+    - name: Configurar Recursos, Firewall e RDP
       shell: powershell
       run: |
+        $ErrorActionPreference = "SilentlyContinue"
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
@@ -19,19 +20,19 @@ jobs:
         reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v fEnableDesktopWallpaper /t REG_DWORD /d 1 /f
         reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxColorDepth /t REG_DWORD /d 32 /f
 
-        # Desativa todos os perfis do firewall para não bloquear nenhuma porta do Moonlight
         netsh advfirewall set allprofiles state off
 
         powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
         Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl" -Name "Win32PrioritySeparation" -Value 38 -Force
         Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "LargeSystemCache" -Value 0 -Force
-        Set-CimInstance -Query "SELECT * FROM Win32_PageFileSetting WHERE SettingID LIKE 'C:%'" -Property @{InitialSize = 8192; MaximumSize = 16384} -ErrorAction SilentlyContinue
+        Set-CimInstance -Query "SELECT * FROM Win32_PageFileSetting WHERE SettingID LIKE 'C:%'" -Property @{InitialSize = 8192; MaximumSize = 16384}
 
         Restart-Service -Name TermService -Force
 
-    - name: Baixar e Processar Imagem
+    - name: Processar e Aplicar Wallpaper
       shell: powershell
       run: |
+        $ErrorActionPreference = "SilentlyContinue"
         $wallpaperDir = "C:\Wallpapers"
         New-Item -ItemType Directory -Force -Path $wallpaperDir
         $pngPath = "$wallpaperDir\wallpaper.png"
@@ -56,11 +57,19 @@ jobs:
         [GC]::Collect()
         reg unload HKU\DefaultTemp
 
-        takeown /f "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /a 2>$null
-        icacls "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /grant "Administrators:(F)" 2>$null
-        Copy-Item -Path $jpgPath -Destination "C:\Windows\Web\Wallpaper\Windows\img0.jpg" -Force
+        $targets = @(
+            "C:\Windows\Web\Wallpaper\Windows\img0.jpg",
+            "C:\Windows\Web\4K\Wallpaper\Windows\img0_3840x2160.jpg"
+        )
+        foreach ($t in $targets) {
+            if (Test-Path $t) {
+                cmd /c "takeown /f `"$t`" /a >nul 2>&1"
+                cmd /c "icacls `"$t`" /grant Administrators:F >nul 2>&1"
+                Copy-Item -Path $jpgPath -Destination $t -Force
+            }
+        }
 
-    - name: Instalar Ferramentas, Tailscale e Sunshine
+    - name: Instalar Programas
       shell: powershell
       run: |
         $ErrorActionPreference = "Continue"
@@ -69,7 +78,7 @@ jobs:
         winget install --id LizardByte.Sunshine --silent --accept-source-agreements --accept-package-agreements
         exit 0
 
-    - name: Iniciar Servicos e Sunshine
+    - name: Configurar Sunshine e Executar Servicos
       shell: powershell
       run: |
         Add-Type -AssemblyName System.Security
@@ -87,12 +96,20 @@ jobs:
         Start-Sleep -Seconds 3
         $tailscaleIp = tailscale ip -4
 
-        # Força credenciais para a web do Sunshine
+        $configPaths = @(
+            "$env:USERPROFILE\.config\sunshine",
+            "C:\Users\runneradmin\.config\sunshine",
+            "C:\Windows\System32\config\systemprofile\.config\sunshine"
+        )
+        $confData = "origin_pin_allowed = 1`nflags = 0`ncsrf_allowed_origins = https://$($tailscaleIp):47990,http://$($tailscaleIp):47989,https://localhost:47990"
+        foreach ($cp in $configPaths) {
+            New-Item -ItemType Directory -Force -Path $cp -ErrorAction SilentlyContinue
+            Set-Content -Path "$cp\sunshine.conf" -Value $confData -Force
+        }
+
         & "C:\Program Files\Sunshine\sunshine.exe" --creds RdpUser "$password"
 
-        # Registra e inicia como serviço do Windows com privilégios de sistema
-        cmd /c "C:\Program Files\Sunshine\sunshine.exe --shortcut" 2>$null
-        Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -ArgumentList "C:\Program Files\Sunshine\config\sunshine.conf" -WindowStyle Hidden
+        Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -WindowStyle Hidden
 
         Start-Sleep -Seconds 5
 
@@ -106,7 +123,6 @@ jobs:
         Write-Host "LOGIN WEB      : RdpUser" -ForegroundColor Cyan
         Write-Host "SENHA WEB      : $password" -ForegroundColor Cyan
         Write-Host "==========================================" -ForegroundColor Green
-        Write-Host "Firewall 100% desligado para permitir pareamento imediato no Moonlight."
 
         while ($true) {
             Start-Sleep -Seconds 60
