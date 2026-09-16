@@ -2,6 +2,11 @@ name: RDP e Sunshine com Diagnostico
 
 on: 
   workflow_dispatch:
+    inputs:
+      moonlight_pin:
+        description: 'Digite o PIN do Moonlight aqui (opcional se for parear pelo painel)'
+        required: false
+        default: ''
 
 jobs:
   secure-rdp:
@@ -86,62 +91,40 @@ jobs:
         Start-Sleep -Seconds 3
         $tailscaleIp = tailscale ip -4
 
-        $tsAlias = (Get-NetIPAddress -IPAddress $tailscaleIp).InterfaceAlias
-        netsh advfirewall firewall delete rule name="Sunshine-Web-Tailscale" 2>$null
-        netsh advfirewall firewall delete rule name="Sunshine-Moonlight-TCP-Tailscale" 2>$null
-        netsh advfirewall firewall delete rule name="Sunshine-Moonlight-UDP-Tailscale" 2>$null
-        netsh advfirewall firewall add rule name="Sunshine-Web-Tailscale" dir=in action=allow protocol=TCP localport=47989,47990 interface="$tsAlias"
-        netsh advfirewall firewall add rule name="Sunshine-Moonlight-TCP-Tailscale" dir=in action=allow protocol=TCP localport=47984-48010 interface="$tsAlias"
-        netsh advfirewall firewall add rule name="Sunshine-Moonlight-UDP-Tailscale" dir=in action=allow protocol=UDP localport=47998-48010 interface="$tsAlias"
+        netsh advfirewall firewall add rule name="Sunshine-All-TCP" dir=in action=allow protocol=TCP localport=47984-48010
+        netsh advfirewall firewall add rule name="Sunshine-All-UDP" dir=in action=allow protocol=UDP localport=47984-48010
+
+        Stop-Process -Name "sunshine" -Force -ErrorAction SilentlyContinue
+        Stop-Service -Name "sunshine" -Force -ErrorAction SilentlyContinue
 
         $configDirs = @(
             "$env:USERPROFILE\.config\sunshine",
             "C:\Users\runneradmin\.config\sunshine",
-            "C:\Users\RdpUser\.config\sunshine",
             "C:\Windows\System32\config\systemprofile\.config\sunshine",
             "C:\Program Files\Sunshine\config"
         )
 
-        $confContent = @"
-        csrf_allowed_origins = *
-        origin_pin_allowed = 1
-        "@
+        $confLines = @(
+            "origin_pin_allowed = enabled",
+            "flags = 0",
+            "csrf_allowed_origins = https://$($tailscaleIp):47990,http://$($tailscaleIp):47989,https://localhost:47990"
+        )
 
         foreach ($dir in $configDirs) {
             New-Item -ItemType Directory -Force -Path $dir 2>$null
-            Set-Content -Path "$dir\sunshine.conf" -Value $confContent -Force
+            [System.IO.File]::WriteAllLines("$dir\sunshine.conf", $confLines)
         }
 
         & "C:\Program Files\Sunshine\sunshine.exe" --creds RdpUser "$password"
 
-        if (Get-Service -Name "sunshine" -ErrorAction SilentlyContinue) {
-            Restart-Service -Name "sunshine"
-            $sunshineMode = "Windows Service"
-        } else {
-            Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -WindowStyle Hidden
-            $sunshineMode = "Processo Direto"
+        Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -WindowStyle Hidden
+        Start-Sleep -Seconds 4
+
+        $providedPin = "${{ github.event.inputs.moonlight_pin }}"
+        if ($providedPin -ne "") {
+            Write-Host "Tentando pareamento automatico via CLI com o PIN fornecido..." -ForegroundColor Cyan
+            & "C:\Program Files\Sunshine\sunshine.exe" --pin "$providedPin"
         }
-
-        Start-Sleep -Seconds 5
-
-        $serviceActive = $false
-        if ((Get-Process -Name "sunshine" -ErrorAction SilentlyContinue) -or ((Get-Service -Name "sunshine" -ErrorAction SilentlyContinue).Status -eq "Running")) {
-            $serviceActive = $true
-        }
-
-        $displays = Get-CimInstance Win32_DesktopMonitor
-        $displayCount = ($displays | Measure-Object).Count
-        $gpus = Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name
-        $portCheck = Test-NetConnection -ComputerName 127.0.0.1 -Port 47990 -InformationLevel Quiet
-
-        Write-Host "==========================================" -ForegroundColor Cyan
-        Write-Host "DIAGNOSTICO DO SUNSHINE E DISPLAY" -ForegroundColor Cyan
-        Write-Host "Modo de Execucao       : $sunshineMode"
-        Write-Host "Servico/Processo Ativo : $serviceActive"
-        Write-Host "Porta Web 47990 Local  : $portCheck"
-        Write-Host "Monitores Detectados   : $displayCount"
-        Write-Host "Adaptadores de Video   : $($gpus -join ', ')"
-        Write-Host "==========================================" -ForegroundColor Cyan
 
         Write-Host "==========================================" -ForegroundColor Green
         Write-Host "DADOS DE CONEXAO" -ForegroundColor Green
