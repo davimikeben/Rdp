@@ -1,4 +1,4 @@
-name: RDP com Tailscale
+name: RDP e Sunshine com Diagnostico
 
 on: 
   workflow_dispatch:
@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
-    - name: Otimizar Recursos, Threads e Configurar RDP
+    - name: Otimizar Recursos e Configurar RDP
       shell: powershell
       run: |
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
@@ -22,29 +22,22 @@ jobs:
         reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxColorDepth /t REG_DWORD /d 32 /f
 
         powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
-        powercfg /setacvalueindex scheme_current sub_processor CPMINCORES 100
-        powercfg /setacvalueindex scheme_current sub_processor CPMAXCORES 100
-        powercfg /setacvalueindex scheme_current sub_processor THROTTLING 0
-        powercfg /setacvalueindex scheme_current sub_processor PERFBOOSTMODE 2
-        powercfg /setactive scheme_current
-
         Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl" -Name "Win32PrioritySeparation" -Value 38 -Force
         Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "LargeSystemCache" -Value 0 -Force
         Set-CimInstance -Query "SELECT * FROM Win32_PageFileSetting WHERE SettingID LIKE 'C:%'" -Property @{InitialSize = 8192; MaximumSize = 16384} -ErrorAction SilentlyContinue
 
         Restart-Service -Name TermService -Force
 
-    - name: Baixar e Substituir Temas do Windows 11
+    - name: Baixar e Processar Imagem
       shell: powershell
       run: |
-        $ErrorActionPreference = "SilentlyContinue"
         $wallpaperDir = "C:\Wallpapers"
         New-Item -ItemType Directory -Force -Path $wallpaperDir
         $pngPath = "$wallpaperDir\wallpaper.png"
         $bmpPath = "$wallpaperDir\wallpaper.bmp"
         $jpgPath = "$wallpaperDir\wallpaper.jpg"
 
-        $url = "https://raw.githubusercontent.com/davimikeben/WALLPAPER-IMAGEM-PARA-PC/refs/heads/main/1337072.jpeg"
+        $url = "https://raw.githubusercontent.com/davimikeben/WALLPAPER-IMAGEM-PARA-PC/refs/heads/main/file_000000009e10820eb6fa2a09146bf436.png"
         Invoke-WebRequest -Uri $url -OutFile $pngPath
 
         Add-Type -AssemblyName System.Drawing
@@ -53,54 +46,29 @@ jobs:
         $image.Save($jpgPath, [System.Drawing.Imaging.ImageFormat]::Jpeg)
         $image.Dispose()
 
-        $targets = @(
-            "C:\Windows\Web\Wallpaper\Windows\img0.jpg",
-            "C:\Windows\Web\Wallpaper\Theme1\img1.jpg",
-            "C:\Windows\Web\Wallpaper\Theme2\img2.jpg",
-            "C:\Windows\Web\4K\Wallpaper\Windows\img0_3840x2160.jpg",
-            "C:\Windows\Web\4K\Wallpaper\Windows\img0_1920x1200.jpg"
-        )
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v Wallpaper /t REG_SZ /d "$bmpPath" /f
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v WallpaperStyle /t REG_SZ /d "2" /f
 
-        foreach ($target in $targets) {
-            if (Test-Path $target) {
-                cmd /c "takeown /f `"$target`" /a >nul 2>&1"
-                cmd /c "icacls `"$target`" /grant Administrators:F >nul 2>&1"
-                Copy-Item -Path $jpgPath -Destination $target -Force -ErrorAction SilentlyContinue
-            }
-        }
+        reg load HKU\DefaultTemp "C:\Users\Default\NTUSER.DAT"
+        reg add "HKU\DefaultTemp\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "$bmpPath" /f
+        reg add "HKU\DefaultTemp\Control Panel\Desktop" /v WallpaperStyle /t REG_SZ /d "2" /f
+        [GC]::Collect()
+        reg unload HKU\DefaultTemp
 
-        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP" /v DesktopImagePath /t REG_SZ /d "$jpgPath" /f
-        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP" /v DesktopImageUrl /t REG_SZ /d "$jpgPath" /f
-        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP" /v DesktopImageStatus /t REG_DWORD /d 1 /f
+        takeown /f "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /a 2>$null
+        icacls "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /grant "Administrators:(F)" 2>$null
+        Copy-Item -Path $jpgPath -Destination "C:\Windows\Web\Wallpaper\Windows\img0.jpg" -Force
 
-        reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\Personalization" /v LockScreenImage /t REG_SZ /d "$jpgPath" /f
-        exit 0
-
-    - name: Criar Script de Aplicacao Automatica no Login
-      shell: powershell
-      run: |
-        $startupDir = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
-        
-        $vbs = @"
-        Set oShell = CreateObject("WScript.Shell")
-        Set fso = CreateObject("Scripting.FileSystemObject")
-        WScript.Sleep 2000
-        oShell.RegWrite "HKCU\Control Panel\Desktop\Wallpaper", "C:\Wallpapers\wallpaper.bmp", "REG_SZ"
-        oShell.RegWrite "HKCU\Control Panel\Desktop\WallpaperStyle", "2", "REG_SZ"
-        oShell.Run "RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters 1, True", 0, True
-        "@
-        
-        Set-Content -Path "$startupDir\set_wallpaper.vbs" -Value $vbs -Encoding Ascii
-
-    - name: Instalar Ferramentas e Tailscale
+    - name: Instalar Ferramentas, Tailscale e Sunshine
       shell: powershell
       run: |
         $ErrorActionPreference = "Continue"
         winget install --id Tailscale.Tailscale --silent --accept-source-agreements --accept-package-agreements
         winget install --id Google.Chrome --silent --accept-source-agreements --accept-package-agreements
+        winget install --id LizardByte.Sunshine --silent --accept-source-agreements --accept-package-agreements
         exit 0
 
-    - name: Iniciar Servidor RDP e Tailscale
+    - name: Iniciar Servicos e Diagnostico Detalhado
       shell: powershell
       run: |
         Add-Type -AssemblyName System.Security
@@ -112,19 +80,75 @@ jobs:
         Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser" -ErrorAction SilentlyContinue
         Add-LocalGroupMember -Group "Administrators" -Member "RdpUser" -ErrorAction SilentlyContinue
 
-        $env:Path += ";C:\Program Files\Tailscale"
+        $env:Path += ";C:\Program Files\Tailscale;C:\Program Files\Sunshine"
         tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --unattended --accept-routes
         
         Start-Sleep -Seconds 3
         $tailscaleIp = tailscale ip -4
 
-        Write-Host "==========================================" -ForegroundColor Green
-        Write-Host ">>> CONEXÃO PRONTA <<<" -ForegroundColor Green
-        Write-Host "IP TAILSCALE : $tailscaleIp" -ForegroundColor Yellow
-        Write-Host "USUARIO      : RdpUser" -ForegroundColor Yellow
-        Write-Host "SENHA        : $password" -ForegroundColor Yellow
-        Write-Host "==========================================" -ForegroundColor Green
+        $tsAlias = (Get-NetIPAddress -IPAddress $tailscaleIp).InterfaceAlias
+        netsh advfirewall firewall delete rule name="Sunshine-Web-Tailscale" 2>$null
+        netsh advfirewall firewall delete rule name="Sunshine-Moonlight-TCP-Tailscale" 2>$null
+        netsh advfirewall firewall delete rule name="Sunshine-Moonlight-UDP-Tailscale" 2>$null
+        netsh advfirewall firewall add rule name="Sunshine-Web-Tailscale" dir=in action=allow protocol=TCP localport=47989,47990 interface="$tsAlias"
+        netsh advfirewall firewall add rule name="Sunshine-Moonlight-TCP-Tailscale" dir=in action=allow protocol=TCP localport=47984-48010 interface="$tsAlias"
+        netsh advfirewall firewall add rule name="Sunshine-Moonlight-UDP-Tailscale" dir=in action=allow protocol=UDP localport=47998-48010 interface="$tsAlias"
+
+        & "C:\Program Files\Sunshine\sunshine.exe" --creds RdpUser "$password"
+
+        $sunshineLogDir = "$env:USERPROFILE\.config\sunshine"
+        if (!(Test-Path $sunshineLogDir)) {
+            New-Item -ItemType Directory -Force -Path $sunshineLogDir
+        }
+        $logPath = "$sunshineLogDir\sunshine.log"
+
+        if (Get-Service -Name "sunshine" -ErrorAction SilentlyContinue) {
+            Start-Service -Name "sunshine"
+            $sunshineMode = "Windows Service"
+        } else {
+            Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -RedirectStandardOutput $logPath -RedirectStandardError "$sunshineLogDir\sunshine_err.log" -WindowStyle Hidden
+            $sunshineMode = "Processo Direto"
+        }
+
+        Start-Sleep -Seconds 5
+
+        $serviceActive = $false
+        if ((Get-Process -Name "sunshine" -ErrorAction SilentlyContinue) -or ((Get-Service -Name "sunshine" -ErrorAction SilentlyContinue).Status -eq "Running")) {
+            $serviceActive = $true
+        }
+
+        $displays = Get-CimInstance Win32_DesktopMonitor
+        $displayCount = ($displays | Measure-Object).Count
+        $gpus = Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name
+        $portCheck = Test-NetConnection -ComputerName 127.0.0.1 -Port 47990 -InformationLevel Quiet
+
+        Write-Host "==========================================" -ForegroundColor Cyan
+        Write-Host ">>> DIAGNÓSTICO DO SUNSHINE / DISPLAY <<<" -ForegroundColor Cyan
+        Write-Host "Modo de Execucao       : $sunshineMode"
+        Write-Host "Servico/Processo Ativo : $serviceActive"
+        Write-Host "Porta Web (47990) Local: $portCheck"
+        Write-Host "Monitores Detectados   : $displayCount"
+        Write-Host "Adaptador(es) de Video : $($gpus -join ', ')"
         
+        Write-Host "--- LOGS INTERNOS DO SUNSHINE ---" -ForegroundColor DarkCyan
+        if (Test-Path $logPath) {
+            Get-Content -Path $logPath -Tail 20 -ErrorAction SilentlyContinue
+        } else {
+            Write-Host "Arquivo de log padrao ainda nao preenchido."
+        }
+        Write-Host "==========================================" -ForegroundColor Cyan
+
+        Write-Host "==========================================" -ForegroundColor Green
+        Write-Host ">>> DADOS DE CONEXÃO <<<" -ForegroundColor Green
+        Write-Host "IP TAILSCALE   : $tailscaleIp" -ForegroundColor Yellow
+        Write-Host "USUARIO        : RdpUser" -ForegroundColor Yellow
+        Write-Host "SENHA          : $password" -ForegroundColor Yellow
+        Write-Host "------------------------------------------" -ForegroundColor Cyan
+        Write-Host "WEB SUNSHINE   : https://$($tailscaleIp):47990" -ForegroundColor Cyan
+        Write-Host "LOGIN WEB      : RdpUser" -ForegroundColor Cyan
+        Write-Host "SENHA WEB      : $password" -ForegroundColor Cyan
+        Write-Host "==========================================" -ForegroundColor Green
+
         while ($true) {
             Start-Sleep -Seconds 60
         }
