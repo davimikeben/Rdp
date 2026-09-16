@@ -123,12 +123,12 @@ jobs:
         $portCheck = Test-NetConnection -ComputerName 127.0.0.1 -Port 47990 -InformationLevel Quiet
 
         Write-Host "==========================================" -ForegroundColor Cyan
-        Write-Host ">>> DIAGNÓSTICO DO SUNSHINE / DISPLAY <<<" -ForegroundColor Cyan
+        Write-Host "DIAGNOSTICO DO SUNSHINE E DISPLAY" -ForegroundColor Cyan
         Write-Host "Modo de Execucao       : $sunshineMode"
         Write-Host "Servico/Processo Ativo : $serviceActive"
-        Write-Host "Porta Web (47990) Local: $portCheck"
+        Write-Host "Porta Web 47990 Local  : $portCheck"
         Write-Host "Monitores Detectados   : $displayCount"
-        Write-Host "Adaptador(es) de Video : $($gpus -join ', ')"
+        Write-Host "Adaptadores de Video   : $($gpus -join ', ')"
         
         Write-Host "--- LOGS INTERNOS DO SUNSHINE ---" -ForegroundColor DarkCyan
         if (Test-Path $logPath) {
@@ -139,7 +139,7 @@ jobs:
         Write-Host "==========================================" -ForegroundColor Cyan
 
         Write-Host "==========================================" -ForegroundColor Green
-        Write-Host ">>> DADOS DE CONEXÃO <<<" -ForegroundColor Green
+        Write-Host "DADOS DE CONEXAO" -ForegroundColor Green
         Write-Host "IP TAILSCALE   : $tailscaleIp" -ForegroundColor Yellow
         Write-Host "USUARIO        : RdpUser" -ForegroundColor Yellow
         Write-Host "SENHA          : $password" -ForegroundColor Yellow
