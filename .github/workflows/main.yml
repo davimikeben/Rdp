@@ -1,89 +1,129 @@
-name: Ubuntu RDP com Tailscale
+name: RDP e Sunshine com Tailscale
 
 on: 
   workflow_dispatch:
 
 jobs:
-  ubuntu-rdp:
-    runs-on: ubuntu-latest
+  secure-rdp:
+    runs-on: windows-latest
     timeout-minutes: 360
 
     steps:
-    - name: Atualizar Sistema e Instalar Interface Leve (XFCE) e XRDP
+    - name: Configurar Recursos, Firewall e RDP
+      shell: powershell
       run: |
-        sudo apt update -y
-        sudo DEBIAN_FRONTEND=noninteractive apt install -y xfce4 xfce4-goodies xrdp feh dbus-x11
+        $ErrorActionPreference = "SilentlyContinue"
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
 
-        echo "xfce4-session" > ~/.xsession
-        sudo cp ~/.xsession /etc/skel/.xsession
-        sudo adduser xrdp ssl-cert
+        reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v fEnableDesktopWallpaper /t REG_DWORD /d 1 /f
+        reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxColorDepth /t REG_DWORD /d 32 /f
 
-        sudo sysctl -w net.core.rmem_max=16777216
-        sudo sysctl -w net.core.wmem_max=16777216
-        sudo sysctl -w net.ipv4.tcp_rmem="4096 87380 16777216"
-        sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 16777216"
+        netsh advfirewall set allprofiles state off
 
-        sudo systemctl restart xrdp
+        powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl" -Name "Win32PrioritySeparation" -Value 38 -Force
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "LargeSystemCache" -Value 0 -Force
+        Set-CimInstance -Query "SELECT * FROM Win32_PageFileSetting WHERE SettingID LIKE 'C:%'" -Property @{InitialSize = 8192; MaximumSize = 16384}
 
-    - name: Instalar Google Chrome
+        Restart-Service -Name TermService -Force
+
+    - name: Processar e Aplicar Wallpaper
+      shell: powershell
       run: |
-        wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-        sudo apt install -y ./google-chrome-stable_current_amd64.deb
-        rm -f google-chrome-stable_current_amd64.deb
+        $ErrorActionPreference = "SilentlyContinue"
+        $wallpaperDir = "C:\Wallpapers"
+        New-Item -ItemType Directory -Force -Path $wallpaperDir
+        $pngPath = "$wallpaperDir\wallpaper.png"
+        $bmpPath = "$wallpaperDir\wallpaper.bmp"
+        $jpgPath = "$wallpaperDir\wallpaper.jpg"
 
-    - name: Baixar e Configurar Wallpaper
+        $url = "https://raw.githubusercontent.com/davimikeben/WALLPAPER-IMAGEM-PARA-PC/refs/heads/main/file_000000009e10820eb6fa2a09146bf436.png"
+        Invoke-WebRequest -Uri $url -OutFile $pngPath
+
+        Add-Type -AssemblyName System.Drawing
+        $image = [System.Drawing.Image]::FromFile($pngPath)
+        $image.Save($bmpPath, [System.Drawing.Imaging.ImageFormat]::Bmp)
+        $image.Save($jpgPath, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+        $image.Dispose()
+
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v Wallpaper /t REG_SZ /d "$bmpPath" /f
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v WallpaperStyle /t REG_SZ /d "2" /f
+
+        reg load HKU\DefaultTemp "C:\Users\Default\NTUSER.DAT"
+        reg add "HKU\DefaultTemp\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "$bmpPath" /f
+        reg add "HKU\DefaultTemp\Control Panel\Desktop" /v WallpaperStyle /t REG_SZ /d "2" /f
+        [GC]::Collect()
+        reg unload HKU\DefaultTemp
+
+        $targets = @(
+            "C:\Windows\Web\Wallpaper\Windows\img0.jpg",
+            "C:\Windows\Web\4K\Wallpaper\Windows\img0_3840x2160.jpg"
+        )
+        foreach ($t in $targets) {
+            if (Test-Path $t) {
+                cmd /c "takeown /f `"$t`" /a >nul 2>&1"
+                cmd /c "icacls `"$t`" /grant Administrators:F >nul 2>&1"
+                Copy-Item -Path $jpgPath -Destination $t -Force
+            }
+        }
+
+    - name: Instalar Programas
+      shell: powershell
       run: |
-        mkdir -p ~/Pictures
-        wget -q -O ~/Pictures/wallpaper.png "https://raw.githubusercontent.com/davimikeben/WALLPAPER-IMAGEM-PARA-PC/refs/heads/main/file_000000009e10820eb6fa2a09146bf436.png"
+        $ErrorActionPreference = "Continue"
+        winget install --id Tailscale.Tailscale --silent --accept-source-agreements --accept-package-agreements
+        winget install --id Google.Chrome --silent --accept-source-agreements --accept-package-agreements
+        winget install --id LizardByte.Sunshine --silent --accept-source-agreements --accept-package-agreements
+        exit 0
 
-        mkdir -p ~/.config/autostart
-        cat << 'EOF' > ~/.config/autostart/wallpaper.desktop
-        [Desktop Entry]
-        Type=Application
-        Exec=feh --bg-scale /etc/skel/Pictures/wallpaper.png
-        Hidden=false
-        NoDisplay=false
-        X-GNOME-Autostart-enabled=true
-        Name=SetWallpaper
-        EOF
-
-        sudo mkdir -p /etc/skel/Pictures
-        sudo cp ~/Pictures/wallpaper.png /etc/skel/Pictures/
-        sudo mkdir -p /etc/skel/.config/autostart
-        sudo cp ~/.config/autostart/wallpaper.desktop /etc/skel/.config/autostart/
-
-    - name: Instalar e Conectar Tailscale
+    - name: Configurar Sunshine e Executar Servicos
+      shell: powershell
       run: |
-        curl -fsSL https://tailscale.com/install.sh | sh
-        sudo tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --accept-routes
+        Add-Type -AssemblyName System.Security
+        $chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*"
+        $password = -join ((1..16) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
+        $securePass = ConvertTo-SecureString $password -AsPlainText -Force
         
-        sleep 3
-        TS_IP=$(tailscale ip -4)
-        echo "TS_IP=$TS_IP" >> $GITHUB_ENV
+        New-LocalUser -Name "RdpUser" -Password $securePass -Description "Usuario RDP" -ErrorAction SilentlyContinue
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser" -ErrorAction SilentlyContinue
+        Add-LocalGroupMember -Group "Administrators" -Member "RdpUser" -ErrorAction SilentlyContinue
 
-    - name: Criar Usuario e Iniciar Servico
-      run: |
-        PASSWORD=$(tr -dc 'A-Za-z0-9!@#$%^&*' < /dev/urandom | head -c 16)
+        $env:Path += ";C:\Program Files\Tailscale;C:\Program Files\Sunshine"
+        tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --unattended --accept-routes
         
-        sudo useradd -m -s /bin/bash RdpUser
-        echo "RdpUser:$PASSWORD" | sudo chpasswd
-        sudo usermod -aG sudo RdpUser
-        sudo usermod -aG ssl-cert RdpUser
+        Start-Sleep -Seconds 3
+        $tailscaleIp = tailscale ip -4
 
-        sudo mkdir -p /home/RdpUser/Pictures
-        sudo mkdir -p /home/RdpUser/.config/autostart
-        sudo cp ~/Pictures/wallpaper.png /home/RdpUser/Pictures/
-        sudo cp ~/.config/autostart/wallpaper.desktop /home/RdpUser/.config/autostart/
-        echo "xfce4-session" | sudo tee /home/RdpUser/.xsession
-        sudo chown -R RdpUser:RdpUser /home/RdpUser/
+        $configPaths = @(
+            "$env:USERPROFILE\.config\sunshine",
+            "C:\Users\runneradmin\.config\sunshine",
+            "C:\Windows\System32\config\systemprofile\.config\sunshine"
+        )
+        $confData = "origin_pin_allowed = 1`nflags = 0`ncsrf_allowed_origins = https://$($tailscaleIp):47990,http://$($tailscaleIp):47989,https://localhost:47990"
+        foreach ($cp in $configPaths) {
+            New-Item -ItemType Directory -Force -Path $cp -ErrorAction SilentlyContinue
+            Set-Content -Path "$cp\sunshine.conf" -Value $confData -Force
+        }
 
-        echo "=========================================="
-        echo ">>> UBUNTU RDP PRONTO <<<"
-        echo "IP TAILSCALE : $TS_IP"
-        echo "USUARIO      : RdpUser"
-        echo "SENHA        : $PASSWORD"
-        echo "=========================================="
+        & "C:\Program Files\Sunshine\sunshine.exe" --creds RdpUser "$password"
 
-        while true; do
-            sleep 60
-        done
+        Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -WindowStyle Hidden
+
+        Start-Sleep -Seconds 5
+
+        Write-Host "==========================================" -ForegroundColor Green
+        Write-Host "DADOS DE CONEXAO" -ForegroundColor Green
+        Write-Host "IP TAILSCALE   : $tailscaleIp" -ForegroundColor Yellow
+        Write-Host "USUARIO        : RdpUser" -ForegroundColor Yellow
+        Write-Host "SENHA          : $password" -ForegroundColor Yellow
+        Write-Host "------------------------------------------" -ForegroundColor Cyan
+        Write-Host "WEB SUNSHINE   : https://$($tailscaleIp):47990" -ForegroundColor Cyan
+        Write-Host "LOGIN WEB      : RdpUser" -ForegroundColor Cyan
+        Write-Host "SENHA WEB      : $password" -ForegroundColor Cyan
+        Write-Host "==========================================" -ForegroundColor Green
+
+        while ($true) {
+            Start-Sleep -Seconds 60
+        }
