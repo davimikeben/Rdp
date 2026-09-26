@@ -1,4 +1,4 @@
-name: RDP e Sunshine com Tailscale
+name: RDP e StarDesk com Tailscale
 
 on: 
   workflow_dispatch:
@@ -9,18 +9,29 @@ jobs:
     timeout-minutes: 360
 
     steps:
-    - name: Configurar Recursos, Firewall e RDP
+    - name: Configurar Recursos, Audio, Firewall e RDP
       shell: powershell
       run: |
         $ErrorActionPreference = "SilentlyContinue"
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudio" -Value 0 -Force
+
+        Set-Service -Name "Audiosrv" -StartupType Automatic
+        Start-Service -Name "Audiosrv" -Force
+        Set-Service -Name "AudioEndpointBuilder" -StartupType Automatic
+        Start-Service -Name "AudioEndpointBuilder" -Force
 
         reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v fEnableDesktopWallpaper /t REG_DWORD /d 1 /f
         reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxColorDepth /t REG_DWORD /d 32 /f
 
         netsh advfirewall set allprofiles state off
+        netsh int tcp set global autotuninglevel=disabled
+
+        New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -Name "NetworkThrottlingIndex" -Value 0xffffffff -PropertyType DWord -Force
+        New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -Name "SystemResponsiveness" -Value 0 -PropertyType DWord -Force
+        reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\Psched" /v NonBestEffortLimit /t REG_DWORD /d 0 /f
 
         powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
         Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl" -Name "Win32PrioritySeparation" -Value 38 -Force
@@ -69,16 +80,20 @@ jobs:
             }
         }
 
-    - name: Instalar Programas
+    - name: Instalar Programas e Baixar StarDesk
       shell: powershell
       run: |
         $ErrorActionPreference = "Continue"
         winget install --id Tailscale.Tailscale --silent --accept-source-agreements --accept-package-agreements
         winget install --id Google.Chrome --silent --accept-source-agreements --accept-package-agreements
-        winget install --id LizardByte.Sunshine --silent --accept-source-agreements --accept-package-agreements
+        winget install --id VB-Audio.VirtualCable --silent --accept-source-agreements --accept-package-agreements
+        winget install --id Stardesk.Stardesk -e --silent --accept-source-agreements --accept-package-agreements
+
+        $stardeskInstaller = "C:\Users\Public\Desktop\Instalar_StarDesk.exe"
+        Invoke-WebRequest -Uri "https://www.stardesk.net/api/v1/release/dl/1" -OutFile $stardeskInstaller -UserAgent "Mozilla/5.0" -ErrorAction SilentlyContinue
         exit 0
 
-    - name: Configurar Sunshine e Executar Servicos
+    - name: Iniciar Servicos e Finalizar
       shell: powershell
       run: |
         Add-Type -AssemblyName System.Security
@@ -90,28 +105,11 @@ jobs:
         Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser" -ErrorAction SilentlyContinue
         Add-LocalGroupMember -Group "Administrators" -Member "RdpUser" -ErrorAction SilentlyContinue
 
-        $env:Path += ";C:\Program Files\Tailscale;C:\Program Files\Sunshine"
+        $env:Path += ";C:\Program Files\Tailscale"
         tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --unattended --accept-routes
         
         Start-Sleep -Seconds 3
         $tailscaleIp = tailscale ip -4
-
-        $configPaths = @(
-            "$env:USERPROFILE\.config\sunshine",
-            "C:\Users\runneradmin\.config\sunshine",
-            "C:\Windows\System32\config\systemprofile\.config\sunshine"
-        )
-        $confData = "origin_pin_allowed = 1`nflags = 0`ncsrf_allowed_origins = https://$($tailscaleIp):47990,http://$($tailscaleIp):47989,https://localhost:47990"
-        foreach ($cp in $configPaths) {
-            New-Item -ItemType Directory -Force -Path $cp -ErrorAction SilentlyContinue
-            Set-Content -Path "$cp\sunshine.conf" -Value $confData -Force
-        }
-
-        & "C:\Program Files\Sunshine\sunshine.exe" --creds RdpUser "$password"
-
-        Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -WindowStyle Hidden
-
-        Start-Sleep -Seconds 5
 
         Write-Host "==========================================" -ForegroundColor Green
         Write-Host "DADOS DE CONEXAO" -ForegroundColor Green
@@ -119,9 +117,7 @@ jobs:
         Write-Host "USUARIO        : RdpUser" -ForegroundColor Yellow
         Write-Host "SENHA          : $password" -ForegroundColor Yellow
         Write-Host "------------------------------------------" -ForegroundColor Cyan
-        Write-Host "WEB SUNSHINE   : https://$($tailscaleIp):47990" -ForegroundColor Cyan
-        Write-Host "LOGIN WEB      : RdpUser" -ForegroundColor Cyan
-        Write-Host "SENHA WEB      : $password" -ForegroundColor Cyan
+        Write-Host "STARDESK       : Instalado / Disponivel na Area de Trabalho" -ForegroundColor Cyan
         Write-Host "==========================================" -ForegroundColor Green
 
         while ($true) {
