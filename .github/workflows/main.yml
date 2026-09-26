@@ -50,7 +50,7 @@ jobs:
         $bmpPath = "$wallpaperDir\wallpaper.bmp"
         $jpgPath = "$wallpaperDir\wallpaper.jpg"
 
-        $url = "https://raw.githubusercontent.com/davimikeben/WALLPAPER-IMAGEM-PARA-PC/refs/heads/main/file_000000009e10820eb6fa2a09146bf436.png"
+        $url = "https://raw.githubusercontent.com/davimikeben/WALLPAPER-IMAGEM-PARA-PC/refs/heads/main/thumb-1920-1399041.jpg"
         Invoke-WebRequest -Uri $url -OutFile $pngPath
 
         Add-Type -AssemblyName System.Drawing
